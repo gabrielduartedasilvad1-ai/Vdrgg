@@ -1,0 +1,1440 @@
+--==============================================================
+-- WHITEZ LUA | MONO SPEED V2
+-- WalkSpeed + velocidade horizontal local
+--==============================================================
+
+--==============================================================
+-- SERVIÇOS
+--==============================================================
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
+
+local Player = Players.LocalPlayer
+if not Player then
+    warn("MONO SPEED deve ser executado no cliente.")
+    return
+end
+
+--==============================================================
+-- AMBIENTE / INSTÂNCIA ÚNICA
+--==============================================================
+local Env = _G
+
+pcall(function()
+    Env = (getgenv or function()
+        return _G
+    end)()
+end)
+
+local KEY = "__WHITEZ_MONO_SPEED"
+local Previous = Env[KEY]
+
+if type(Previous) == "table" and type(Previous.Destroy) == "function" then
+    pcall(Previous.Destroy)
+end
+
+local App = {}
+Env[KEY] = App
+
+local Alive = true
+local Connections = {}
+local Tweens = {}
+local Destroy
+
+local function Connect(signal, callback)
+    local connection = signal:Connect(callback)
+    table.insert(Connections, connection)
+    return connection
+end
+
+--==============================================================
+-- CONFIG
+--==============================================================
+local Config = {
+    Enabled = false,
+    Speed = 75,
+    Min = 16,
+    Max = 200,
+    Mode = "Physics",
+    Particles = true,
+}
+
+local FILE = "WhitezMonoSpeedV2.json"
+local SaveVersion = 0
+
+local function ValidNumber(value)
+    local number = tonumber(value)
+    if not number or number ~= number or math.abs(number) == math.huge then
+        return nil
+    end
+    return number
+end
+
+local function NormalizeSpeed(value)
+    local number = ValidNumber(value)
+    if not number then
+        return Config.Speed
+    end
+    return math.clamp(math.floor(number + 0.5), Config.Min, Config.Max)
+end
+
+pcall(function()
+    if type(readfile) ~= "function" then
+        return
+    end
+
+    if type(isfile) == "function" and not isfile(FILE) then
+        return
+    end
+
+    local data = HttpService:JSONDecode(readfile(FILE))
+
+    if type(data) ~= "table" then
+        return
+    end
+
+    Config.Speed = NormalizeSpeed(data.Speed)
+
+    if data.Mode == "Physics" or data.Mode == "WalkSpeed" then
+        Config.Mode = data.Mode
+    end
+
+    if type(data.Particles) == "boolean" then
+        Config.Particles = data.Particles
+    end
+end)
+
+local function SaveNow()
+    pcall(function()
+        if type(writefile) == "function" then
+            writefile(FILE, HttpService:JSONEncode({
+                Speed = Config.Speed,
+                Mode = Config.Mode,
+                Particles = Config.Particles,
+            }))
+        end
+    end)
+end
+
+local function ScheduleSave()
+    SaveVersion += 1
+    local version = SaveVersion
+
+    task.delay(0.5, function()
+        if Alive and version == SaveVersion then
+            SaveNow()
+        end
+    end)
+end
+
+--==============================================================
+-- UTILS
+--==============================================================
+local function New(className, properties, parent)
+    local object = Instance.new(className)
+
+    for name, value in pairs(properties or {}) do
+        object[name] = value
+    end
+
+    object.Parent = parent
+    return object
+end
+
+local function Corner(parent, radius)
+    return New("UICorner", {
+        CornerRadius = UDim.new(0, radius or 12),
+    }, parent)
+end
+
+local function Stroke(parent, transparency)
+    return New("UIStroke", {
+        Color = Color3.new(1, 1, 1),
+        Transparency = transparency or 0.85,
+        Thickness = 1,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+    }, parent)
+end
+
+local function Gradient(parent, top, bottom)
+    return New("UIGradient", {
+        Rotation = 90,
+        Color = ColorSequence.new(top, bottom),
+    }, parent)
+end
+
+local function Animate(object, properties, duration)
+    if not Alive or not object.Parent then
+        return
+    end
+
+    if Tweens[object] then
+        pcall(function()
+            Tweens[object]:Cancel()
+        end)
+    end
+
+    local tween = TweenService:Create(
+        object,
+        TweenInfo.new(
+            duration or 0.18,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        ),
+        properties
+    )
+
+    Tweens[object] = tween
+    tween:Play()
+
+    task.delay((duration or 0.18) + 0.1, function()
+        if Tweens[object] == tween then
+            Tweens[object] = nil
+        end
+    end)
+end
+
+local function Label(parent, text, x, y, width, height, size, color)
+    return New("TextLabel", {
+        BackgroundTransparency = 1,
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(width, height),
+        Text = text,
+        Font = Enum.Font.Gotham,
+        TextSize = size or 12,
+        TextColor3 = color or Color3.fromRGB(240, 240, 244),
+        TextXAlignment = Enum.TextXAlignment.Left,
+        ZIndex = 6,
+    }, parent)
+end
+
+local function Button(parent, text, x, y, width, height)
+    local button = New("TextButton", {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(width, height),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.93,
+        BorderSizePixel = 0,
+        Text = text,
+        Font = Enum.Font.GothamMedium,
+        TextSize = 13,
+        TextColor3 = Color3.fromRGB(245, 245, 245),
+        AutoButtonColor = false,
+        ZIndex = 8,
+    }, parent)
+
+    Corner(button, 9)
+    Stroke(button, 0.9)
+
+    Connect(button.MouseEnter, function()
+        Animate(button, {BackgroundTransparency = 0.84})
+    end)
+
+    Connect(button.MouseLeave, function()
+        Animate(button, {BackgroundTransparency = 0.93})
+    end)
+
+    return button
+end
+
+local function Card(parent, x, y, width, height)
+    local card = New("Frame", {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(width, height),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.945,
+        BorderSizePixel = 0,
+        ZIndex = 4,
+    }, parent)
+
+    Corner(card, 13)
+    Stroke(card, 0.87)
+    Gradient(
+        card,
+        Color3.fromRGB(255, 255, 255),
+        Color3.fromRGB(140, 140, 150)
+    )
+
+    return card
+end
+
+local function MakeToggle(parent, x, y)
+    local button = New("TextButton", {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(43, 24),
+        BackgroundColor3 = Color3.fromRGB(60, 60, 66),
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = 8,
+    }, parent)
+
+    Corner(button, 20)
+
+    local knob = New("Frame", {
+        Position = UDim2.fromOffset(3, 3),
+        Size = UDim2.fromOffset(18, 18),
+        BackgroundColor3 = Color3.fromRGB(210, 210, 215),
+        BorderSizePixel = 0,
+        ZIndex = 9,
+    }, button)
+
+    Corner(knob, 20)
+
+    local function Paint(enabled)
+        Animate(button, {
+            BackgroundColor3 = enabled
+                and Color3.fromRGB(245, 245, 245)
+                or Color3.fromRGB(60, 60, 66),
+        })
+
+        Animate(knob, {
+            Position = UDim2.fromOffset(enabled and 22 or 3, 3),
+            BackgroundColor3 = enabled
+                and Color3.fromRGB(18, 18, 20)
+                or Color3.fromRGB(210, 210, 215),
+        })
+    end
+
+    return button, Paint
+end
+
+local function Viewport()
+    local camera = Workspace.CurrentCamera
+    return camera and camera.ViewportSize or Vector2.new(800, 600)
+end
+
+--==============================================================
+-- UI LIBRARY / ROOT
+--==============================================================
+local Gui = New("ScreenGui", {
+    Name = "WhitezMonoSpeedV2",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    DisplayOrder = 99999,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+})
+
+local function TryParent(parent)
+    if not parent then
+        return false
+    end
+
+    local success = pcall(function()
+        Gui.Parent = parent
+    end)
+
+    return success and Gui.Parent == parent
+end
+
+local HiddenRoot
+
+pcall(function()
+    if type(gethui) == "function" then
+        HiddenRoot = gethui()
+    end
+end)
+
+if not TryParent(HiddenRoot) and not TryParent(CoreGui) then
+    TryParent(Player:WaitForChild("PlayerGui"))
+end
+
+if not Gui.Parent then
+    Gui:Destroy()
+    Env[KEY] = nil
+    warn("MONO SPEED: falha ao criar a interface.")
+    return
+end
+
+local WIDTH = 360
+local HEIGHT = 394
+
+local Window = New("Frame", {
+    Name = "Panel",
+    Size = UDim2.fromOffset(WIDTH, HEIGHT),
+    BackgroundColor3 = Color3.fromRGB(14, 14, 17),
+    BackgroundTransparency = 0.08,
+    BorderSizePixel = 0,
+    Active = true,
+    ZIndex = 2,
+}, Gui)
+
+Corner(Window, 18)
+Stroke(Window, 0.7)
+Gradient(
+    Window,
+    Color3.fromRGB(34, 34, 38),
+    Color3.fromRGB(8, 8, 10)
+)
+
+local WindowScale = New("UIScale", {Scale = 1}, Window)
+
+for index = 1, 4 do
+    local shadow = New("Frame", {
+        Position = UDim2.fromOffset(-index * 3, index),
+        Size = UDim2.new(1, index * 6, 1, index * 4),
+        BackgroundColor3 = Color3.new(0, 0, 0),
+        BackgroundTransparency = 0.9,
+        BorderSizePixel = 0,
+        ZIndex = 1,
+    }, Window)
+    Corner(shadow, 18 + index * 2)
+end
+
+local ParticleLayer = New("Frame", {
+    Size = UDim2.fromScale(1, 1),
+    BackgroundTransparency = 1,
+    ClipsDescendants = true,
+    ZIndex = 3,
+}, Window)
+Corner(ParticleLayer, 18)
+
+local Header = New("Frame", {
+    Size = UDim2.fromOffset(262, 62),
+    BackgroundTransparency = 1,
+    Active = true,
+    ZIndex = 7,
+}, Window)
+
+local Logo = Label(Header, "W", 17, 16, 30, 28, 23)
+Logo.Font = Enum.Font.GothamBlack
+
+local Title = Label(Header, "MONO / SPEED V2", 55, 15, 198, 20, 13)
+Title.Font = Enum.Font.GothamBold
+
+Label(
+    Header,
+    "STEAL A BRAINROT · LOCAL",
+    55, 36, 195, 14, 9,
+    Color3.fromRGB(160, 160, 168)
+)
+
+local Minimize = Button(Window, "−", 270, 17, 32, 30)
+local Close = Button(Window, "×", 310, 17, 32, 30)
+
+New("Frame", {
+    Position = UDim2.fromOffset(16, 63),
+    Size = UDim2.new(1, -32, 0, 1),
+    BackgroundColor3 = Color3.new(1, 1, 1),
+    BackgroundTransparency = 0.91,
+    BorderSizePixel = 0,
+    ZIndex = 5,
+}, Window)
+
+local Sidebar = Card(Window, 12, 77, 44, 265)
+local SpeedTab = Button(Sidebar, "»", 5, 7, 34, 36)
+SpeedTab.TextSize = 25
+
+local SettingsTab = Button(Sidebar, "☰", 5, 51, 34, 36)
+SettingsTab.TextSize = 18
+
+local SpeedPage = New("Frame", {
+    Position = UDim2.fromOffset(68, 77),
+    Size = UDim2.fromOffset(278, 265),
+    BackgroundTransparency = 1,
+    ZIndex = 4,
+}, Window)
+
+local SettingsPage = New("Frame", {
+    Position = SpeedPage.Position,
+    Size = SpeedPage.Size,
+    BackgroundTransparency = 1,
+    Visible = false,
+    ZIndex = 4,
+}, Window)
+
+local EnableCard = Card(SpeedPage, 0, 0, 278, 69)
+local SpeedTitle = Label(EnableCard, "Super velocidade", 14, 12, 198, 22, 14)
+SpeedTitle.Font = Enum.Font.GothamBold
+
+Label(
+    EnableCard,
+    "Use o joystick ou WASD",
+    14, 38, 197, 16, 10,
+    Color3.fromRGB(160, 160, 168)
+)
+
+local SpeedToggle, PaintSpeed = MakeToggle(EnableCard, 221, 23)
+
+local AdjustCard = Card(SpeedPage, 0, 79, 278, 107)
+
+Label(
+    AdjustCard,
+    "VELOCIDADE",
+    14, 12, 155, 20, 10,
+    Color3.fromRGB(190, 190, 198)
+)
+
+local SpeedInput = New("TextBox", {
+    Position = UDim2.fromOffset(207, 10),
+    Size = UDim2.fromOffset(57, 28),
+    BackgroundColor3 = Color3.new(1, 1, 1),
+    BackgroundTransparency = 0.92,
+    BorderSizePixel = 0,
+    Text = tostring(Config.Speed),
+    PlaceholderText = "75",
+    TextColor3 = Color3.new(1, 1, 1),
+    PlaceholderColor3 = Color3.fromRGB(130, 130, 138),
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    ClearTextOnFocus = false,
+    ZIndex = 8,
+}, AdjustCard)
+Corner(SpeedInput, 8)
+Stroke(SpeedInput, 0.9)
+
+local SliderHit = New("TextButton", {
+    Position = UDim2.fromOffset(17, 44),
+    Size = UDim2.fromOffset(244, 29),
+    BackgroundTransparency = 1,
+    Text = "",
+    AutoButtonColor = false,
+    ZIndex = 8,
+}, AdjustCard)
+
+local Track = New("Frame", {
+    Position = UDim2.new(0, 0, 0.5, -3),
+    Size = UDim2.new(1, 0, 0, 6),
+    BackgroundColor3 = Color3.fromRGB(65, 65, 72),
+    BorderSizePixel = 0,
+    ZIndex = 6,
+}, SliderHit)
+Corner(Track, 6)
+
+local Fill = New("Frame", {
+    Size = UDim2.fromScale(0, 1),
+    BackgroundColor3 = Color3.fromRGB(240, 240, 245),
+    BorderSizePixel = 0,
+    ZIndex = 7,
+}, Track)
+Corner(Fill, 6)
+
+local Knob = New("Frame", {
+    AnchorPoint = Vector2.new(0.5, 0.5),
+    Position = UDim2.fromScale(0, 0.5),
+    Size = UDim2.fromOffset(15, 15),
+    BackgroundColor3 = Color3.new(1, 1, 1),
+    BorderSizePixel = 0,
+    ZIndex = 9,
+}, Track)
+Corner(Knob, 20)
+
+Label(
+    AdjustCard,
+    tostring(Config.Min),
+    14, 79, 45, 15, 10,
+    Color3.fromRGB(150, 150, 160)
+)
+
+local MaxLabel = Label(
+    AdjustCard,
+    tostring(Config.Max),
+    219, 79, 45, 15, 10,
+    Color3.fromRGB(150, 150, 160)
+)
+MaxLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+local ModeCard = Card(SpeedPage, 0, 196, 278, 69)
+
+Label(
+    ModeCard,
+    "MÉTODO DE MOVIMENTO",
+    14, 7, 248, 18, 9,
+    Color3.fromRGB(180, 180, 190)
+)
+
+local ModeButton = Button(ModeCard, "", 12, 30, 254, 29)
+ModeButton.TextSize = 11
+
+local Dropdown = New("Frame", {
+    Position = UDim2.fromOffset(80, 258),
+    Size = UDim2.fromOffset(254, 77),
+    BackgroundColor3 = Color3.fromRGB(24, 24, 28),
+    BorderSizePixel = 0,
+    Visible = false,
+    ZIndex = 40,
+}, Window)
+Corner(Dropdown, 11)
+Stroke(Dropdown, 0.7)
+
+local PhysicsOption = Button(Dropdown, "Velocidade física", 5, 5, 244, 31)
+local WalkOption = Button(Dropdown, "WalkSpeed padrão", 5, 41, 244, 31)
+PhysicsOption.ZIndex = 41
+WalkOption.ZIndex = 41
+
+local ParticleCard = Card(SettingsPage, 0, 0, 278, 69)
+Label(ParticleCard, "Partículas", 14, 12, 185, 22, 14)
+Label(
+    ParticleCard,
+    "Pontos brancos animados",
+    14, 38, 197, 16, 10,
+    Color3.fromRGB(160, 160, 168)
+)
+
+local ParticleToggle, PaintParticles = MakeToggle(ParticleCard, 221, 23)
+
+local HelpCard = Card(SettingsPage, 0, 79, 278, 186)
+Label(
+    HelpCard,
+    "CONTROLES E OBSERVAÇÕES",
+    14, 12, 250, 18, 10,
+    Color3.fromRGB(190, 190, 198)
+)
+
+local Help = Label(
+    HelpCard,
+    "• Arraste o cabeçalho ou o botão W.\n"
+        .. "• W: abrir ou minimizar o painel.\n"
+        .. "• Ctrl direito: mostrar ou ocultar.\n"
+        .. "• ×: remover e restaurar velocidade.\n\n"
+        .. "O modo físico preserva o pulo e pausa\n"
+        .. "ao sentar, nadar ou escalar.\n\n"
+        .. "O servidor ainda pode limitar o efeito.",
+    14, 38, 252, 138, 10,
+    Color3.fromRGB(200, 200, 208)
+)
+Help.TextYAlignment = Enum.TextYAlignment.Top
+Help.TextWrapped = true
+
+local StatusDot = New("Frame", {
+    Position = UDim2.fromOffset(17, 357),
+    Size = UDim2.fromOffset(6, 6),
+    BackgroundColor3 = Color3.fromRGB(120, 120, 130),
+    BorderSizePixel = 0,
+    ZIndex = 6,
+}, Window)
+Corner(StatusDot, 6)
+
+local Status = Label(
+    Window, "DESATIVADO",
+    31, 348, 311, 23, 10,
+    Color3.fromRGB(190, 190, 198)
+)
+
+Label(
+    Window, "WHITEZ LUA  /  MOBILE + PC",
+    17, 373, 325, 12, 8,
+    Color3.fromRGB(115, 115, 125)
+)
+
+--==============================================================
+-- UI / FLOATING E NOTIFICAÇÕES
+--==============================================================
+local Floating = New("TextButton", {
+    Size = UDim2.fromOffset(48, 48),
+    BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+    BackgroundTransparency = 0.05,
+    BorderSizePixel = 0,
+    Text = "W",
+    TextColor3 = Color3.new(1, 1, 1),
+    Font = Enum.Font.GothamBlack,
+    TextSize = 23,
+    AutoButtonColor = false,
+    ZIndex = 50,
+}, Gui)
+Corner(Floating, 16)
+Stroke(Floating, 0.55)
+Gradient(
+    Floating,
+    Color3.fromRGB(55, 55, 60),
+    Color3.fromRGB(13, 13, 16)
+)
+
+local FloatingScale = New("UIScale", {Scale = 1}, Floating)
+
+local Toast = New("Frame", {
+    AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, -80),
+    Size = UDim2.fromOffset(310, 48),
+    BackgroundColor3 = Color3.fromRGB(18, 18, 22),
+    BackgroundTransparency = 0.04,
+    BorderSizePixel = 0,
+    ZIndex = 60,
+}, Gui)
+Corner(Toast, 12)
+Stroke(Toast, 0.7)
+
+local ToastScale = New("UIScale", {Scale = 1}, Toast)
+local ToastText = Label(Toast, "", 12, 0, 286, 48, 11)
+ToastText.TextXAlignment = Enum.TextXAlignment.Center
+ToastText.TextWrapped = true
+ToastText.ZIndex = 61
+
+local ToastVersion = 0
+
+local function Notify(message)
+    if not Alive then
+        return
+    end
+
+    ToastVersion += 1
+    local version = ToastVersion
+
+    ToastText.Text = message
+    Animate(Toast, {Position = UDim2.new(0.5, 0, 0, 18)}, 0.22)
+
+    task.delay(2.8, function()
+        if Alive and version == ToastVersion then
+            Animate(Toast, {
+                Position = UDim2.new(0.5, 0, 0, -80),
+            }, 0.22)
+        end
+    end)
+end
+
+--==============================================================
+-- UI / RESPONSIVIDADE E ARRASTE
+--==============================================================
+local function ClampPosition(object, x, y)
+    local viewport = Viewport()
+    local size = object.AbsoluteSize
+
+    return math.clamp(x, 6, math.max(6, viewport.X - size.X - 6)),
+        math.clamp(y, 6, math.max(6, viewport.Y - size.Y - 6))
+end
+
+local InitializedLayout = false
+
+local function Layout()
+    local viewport = Viewport()
+    local scale = math.min(
+        1,
+        (viewport.X - 24) / WIDTH,
+        (viewport.Y - 24) / HEIGHT
+    )
+    scale = math.max(0.1, scale)
+
+    WindowScale.Scale = scale
+    FloatingScale.Scale = math.clamp(scale, 0.8, 1)
+    ToastScale.Scale = math.max(0.1, math.min(1, (viewport.X - 20) / 310))
+
+    if not InitializedLayout then
+        InitializedLayout = true
+
+        Window.Position = UDim2.fromOffset(
+            math.max(6, (viewport.X - WIDTH * scale) / 2),
+            math.max(6, (viewport.Y - HEIGHT * scale) / 2)
+        )
+
+        Floating.Position = UDim2.fromOffset(
+            14,
+            math.max(6, viewport.Y * 0.5 - 24)
+        )
+    else
+        for _, object in ipairs({Window, Floating}) do
+            local x, y = ClampPosition(
+                object,
+                object.Position.X.Offset,
+                object.Position.Y.Offset
+            )
+            object.Position = UDim2.fromOffset(x, y)
+        end
+    end
+end
+
+local DragStates = {}
+
+local function MakeDraggable(handle, target)
+    local state = {
+        Active = false,
+        Moved = false,
+        Input = nil,
+        Start = Vector2.zero,
+        Origin = Vector2.zero,
+    }
+
+    table.insert(DragStates, state)
+
+    Connect(handle.InputBegan, function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+            and input.UserInputType ~= Enum.UserInputType.Touch then
+            return
+        end
+
+        if state.Active then
+            return
+        end
+
+        state.Active = true
+        state.Moved = false
+        state.Input = input
+        state.Start = Vector2.new(input.Position.X, input.Position.Y)
+        state.Origin = Vector2.new(
+            target.Position.X.Offset,
+            target.Position.Y.Offset
+        )
+    end)
+
+    Connect(UIS.InputChanged, function(input)
+        if not state.Active or not state.Input then
+            return
+        end
+
+        local touch = state.Input.UserInputType == Enum.UserInputType.Touch
+
+        if touch and input ~= state.Input then
+            return
+        end
+
+        if not touch and input.UserInputType ~= Enum.UserInputType.MouseMovement then
+            return
+        end
+
+        local delta = Vector2.new(input.Position.X, input.Position.Y) - state.Start
+
+        if delta.Magnitude > 6 then
+            state.Moved = true
+        end
+
+        if state.Moved then
+            local x, y = ClampPosition(
+                target,
+                state.Origin.X + delta.X,
+                state.Origin.Y + delta.Y
+            )
+            target.Position = UDim2.fromOffset(x, y)
+        end
+    end)
+
+    Connect(UIS.InputEnded, function(input)
+        if input == state.Input
+            or (
+                state.Input
+                and state.Input.UserInputType == Enum.UserInputType.MouseButton1
+                and input.UserInputType == Enum.UserInputType.MouseButton1
+            ) then
+            state.Active = false
+            state.Input = nil
+        end
+    end)
+
+    return state
+end
+
+MakeDraggable(Header, Window)
+local FloatingDrag = MakeDraggable(Floating, Floating)
+
+local Sliding = false
+local SliderInput
+
+local function CancelInputs()
+    Sliding = false
+    SliderInput = nil
+
+    for _, state in ipairs(DragStates) do
+        state.Active = false
+        state.Input = nil
+    end
+end
+
+local function SetVisible(visible)
+    Window.Visible = visible
+    Dropdown.Visible = false
+    CancelInputs()
+end
+
+Layout()
+
+--==============================================================
+-- FEATURES / PERSONAGEM E MOVIMENTO
+--==============================================================
+local Character
+local Humanoid
+local Root
+local OriginalWalkSpeed
+local BoostApplied = false
+local BindingVersion = 0
+local LastErrorNotice = 0
+
+local function CharacterReady()
+    return Character
+        and Character == Player.Character
+        and Humanoid
+        and Humanoid.Parent
+        and Humanoid.Health > 0
+        and Root
+        and Root.Parent
+end
+
+local function PauseReason()
+    if not CharacterReady() then
+        return "AGUARDANDO PERSONAGEM"
+    end
+
+    if Root.Anchored then
+        return "PERSONAGEM ANCORADO"
+    end
+
+    if Humanoid.Sit then
+        return "PAUSADO · SENTADO"
+    end
+
+    if Humanoid.PlatformStand then
+        return "PAUSADO · SEM CONTROLE"
+    end
+
+    local state = Humanoid:GetState()
+
+    if state == Enum.HumanoidStateType.Swimming then
+        return "PAUSADO · NADANDO"
+    end
+
+    if state == Enum.HumanoidStateType.Climbing then
+        return "PAUSADO · ESCALANDO"
+    end
+
+    if state == Enum.HumanoidStateType.Physics
+        or state == Enum.HumanoidStateType.Ragdoll
+        or state == Enum.HumanoidStateType.FallingDown
+        or state == Enum.HumanoidStateType.GettingUp then
+        return "PAUSADO · ESTADO FÍSICO"
+    end
+
+    return nil
+end
+
+local function RestoreMovement()
+    pcall(function()
+        if Humanoid and Humanoid.Parent and OriginalWalkSpeed ~= nil then
+            Humanoid.WalkSpeed = OriginalWalkSpeed
+        end
+    end)
+
+    -- Remove somente o excesso de velocidade horizontal que o
+    -- próprio script aplicou. Não altera o componente vertical.
+    pcall(function()
+        if BoostApplied and Root and Root.Parent and not Root.Anchored then
+            local velocity = Root.AssemblyLinearVelocity
+            local horizontal = Vector3.new(velocity.X, 0, velocity.Z)
+            local limit = math.max(0, OriginalWalkSpeed or 16)
+
+            if horizontal.Magnitude > limit and horizontal.Magnitude > 0 then
+                horizontal = horizontal.Unit * limit
+                Root.AssemblyLinearVelocity = Vector3.new(
+                    horizontal.X,
+                    velocity.Y,
+                    horizontal.Z
+                )
+            end
+        end
+    end)
+
+    BoostApplied = false
+    OriginalWalkSpeed = nil
+end
+
+local function ApplyMovement()
+    if not Config.Enabled then
+        return
+    end
+
+    if PauseReason() then
+        if OriginalWalkSpeed ~= nil or BoostApplied then
+            RestoreMovement()
+        end
+        return
+    end
+
+    local success, message = pcall(function()
+        if OriginalWalkSpeed == nil then
+            OriginalWalkSpeed = Humanoid.WalkSpeed
+        end
+
+        -- Mantém a configuração padrão alinhada à velocidade escolhida.
+        if Humanoid.WalkSpeed ~= Config.Speed then
+            Humanoid.WalkSpeed = Config.Speed
+        end
+
+        if Config.Mode ~= "Physics" then
+            return
+        end
+
+        -- MoveDirection já considera joystick, teclado e controles
+        -- normais do Roblox em coordenadas do mundo.
+        local direction = Humanoid.MoveDirection
+        local horizontal = Vector3.new(direction.X, 0, direction.Z)
+        local magnitude = horizontal.Magnitude
+
+        if magnitude > 0.02 then
+            local strength = math.min(magnitude, 1)
+            local desired = horizontal.Unit * Config.Speed * strength
+            local current = Root.AssemblyLinearVelocity
+
+            Root.AssemblyLinearVelocity = Vector3.new(
+                desired.X,
+                current.Y,
+                desired.Z
+            )
+
+            BoostApplied = true
+        elseif BoostApplied then
+            -- Soltar o controle interrompe o impulso em piso normal.
+            -- No ar, preserva a inércia do salto.
+            if Humanoid.FloorMaterial ~= Enum.Material.Air then
+                local current = Root.AssemblyLinearVelocity
+                Root.AssemblyLinearVelocity = Vector3.new(0, current.Y, 0)
+                BoostApplied = false
+            end
+        end
+    end)
+
+    if not success and os.clock() - LastErrorNotice > 6 then
+        LastErrorNotice = os.clock()
+        warn("MONO SPEED: " .. tostring(message))
+        Notify("Não foi possível aplicar movimento neste personagem.")
+    end
+end
+
+local function RefreshStatus()
+    if not Config.Enabled then
+        Status.Text = "DESATIVADO"
+        StatusDot.BackgroundColor3 = Color3.fromRGB(115, 115, 125)
+        return
+    end
+
+    local reason = PauseReason()
+
+    if reason then
+        Status.Text = reason
+        StatusDot.BackgroundColor3 = Color3.fromRGB(175, 175, 185)
+        return
+    end
+
+    StatusDot.BackgroundColor3 = Color3.new(1, 1, 1)
+
+    local moving = Humanoid.MoveDirection.Magnitude > 0.02
+    local mode = Config.Mode == "Physics" and "FÍSICO" or "WALKSPEED"
+
+    Status.Text = moving
+        and (mode .. " · ALVO " .. Config.Speed .. " STUDS/S")
+        or (mode .. " · MOVA O PERSONAGEM")
+end
+
+local function BindCharacter(character)
+    if Character == character then
+        return
+    end
+
+    BindingVersion += 1
+    local version = BindingVersion
+
+    RestoreMovement()
+    Character = character
+    Humanoid = nil
+    Root = nil
+
+    task.spawn(function()
+        local deadline = os.clock() + 15
+
+        repeat
+            if not Alive
+                or version ~= BindingVersion
+                or Player.Character ~= character then
+                return
+            end
+
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            local root = character:FindFirstChild("HumanoidRootPart")
+
+            if humanoid and root and root:IsA("BasePart") then
+                Humanoid = humanoid
+                Root = root
+                OriginalWalkSpeed = nil
+                BoostApplied = false
+
+                ApplyMovement()
+                RefreshStatus()
+                return
+            end
+
+            task.wait(0.1)
+        until os.clock() >= deadline
+
+        if Alive and version == BindingVersion then
+            Notify("Personagem sem Humanoid ou HumanoidRootPart.")
+        end
+    end)
+end
+
+local function SetEnabled(enabled)
+    if Config.Enabled == enabled then
+        return
+    end
+
+    Config.Enabled = enabled
+
+    if enabled then
+        ApplyMovement()
+    else
+        RestoreMovement()
+    end
+
+    PaintSpeed(enabled)
+    RefreshStatus()
+
+    if enabled then
+        Notify("Ativado. Use o joystick ou WASD para correr.")
+    else
+        Notify("Desativado. Velocidade original restaurada.")
+    end
+end
+
+local function RefreshSlider()
+    local alpha = (Config.Speed - Config.Min) / (Config.Max - Config.Min)
+    Fill.Size = UDim2.fromScale(alpha, 1)
+    Knob.Position = UDim2.fromScale(alpha, 0.5)
+
+    if not SpeedInput:IsFocused() then
+        SpeedInput.Text = tostring(Config.Speed)
+    end
+end
+
+local function SetSpeed(value)
+    Config.Speed = NormalizeSpeed(value)
+    RefreshSlider()
+    ApplyMovement()
+    RefreshStatus()
+    ScheduleSave()
+end
+
+local function SetMode(mode)
+    RestoreMovement()
+    Config.Mode = mode
+    Dropdown.Visible = false
+
+    ModeButton.Text = mode == "Physics"
+        and "Velocidade física    ▾"
+        or "WalkSpeed padrão    ▾"
+
+    ApplyMovement()
+    RefreshStatus()
+    ScheduleSave()
+end
+
+local function SliderFromX(x)
+    if Track.AbsoluteSize.X <= 0 then
+        return
+    end
+
+    local alpha = math.clamp(
+        (x - Track.AbsolutePosition.X) / Track.AbsoluteSize.X,
+        0,
+        1
+    )
+
+    SetSpeed(Config.Min + alpha * (Config.Max - Config.Min))
+end
+
+--==============================================================
+-- FEATURES / PARTÍCULAS
+--==============================================================
+local Randomizer = Random.new()
+local Particles = {}
+
+for index = 1, 22 do
+    local size = Randomizer:NextInteger(1, 3)
+
+    local particle = New("Frame", {
+        Name = "Particle" .. index,
+        Size = UDim2.fromOffset(size, size),
+        BackgroundColor3 = Color3.new(1, 1, 1),
+        BackgroundTransparency = 0.65,
+        BorderSizePixel = 0,
+        ZIndex = 3,
+    }, ParticleLayer)
+    Corner(particle, 5)
+
+    local data = {
+        Object = particle,
+        X = Randomizer:NextNumber(0.03, 0.97),
+        Y = Randomizer:NextNumber(0, 1),
+        Speed = Randomizer:NextNumber(0.02, 0.055),
+        Phase = Randomizer:NextNumber(0, math.pi * 2),
+        Transparency = Randomizer:NextNumber(0.5, 0.8),
+    }
+
+    particle.Position = UDim2.fromScale(data.X, data.Y)
+    table.insert(Particles, data)
+end
+
+ParticleLayer.Visible = Config.Particles
+
+--==============================================================
+-- CONEXÕES
+--==============================================================
+local function SelectTab(settings)
+    SpeedPage.Visible = not settings
+    SettingsPage.Visible = settings
+    Dropdown.Visible = false
+    Sliding = false
+    SliderInput = nil
+
+    SpeedTab.TextColor3 = settings
+        and Color3.fromRGB(125, 125, 135)
+        or Color3.new(1, 1, 1)
+
+    SettingsTab.TextColor3 = settings
+        and Color3.new(1, 1, 1)
+        or Color3.fromRGB(125, 125, 135)
+end
+
+Connect(SpeedTab.Activated, function()
+    SelectTab(false)
+end)
+
+Connect(SettingsTab.Activated, function()
+    SelectTab(true)
+end)
+
+Connect(SpeedToggle.Activated, function()
+    SetEnabled(not Config.Enabled)
+end)
+
+Connect(ParticleToggle.Activated, function()
+    Config.Particles = not Config.Particles
+    ParticleLayer.Visible = Config.Particles
+    PaintParticles(Config.Particles)
+    ScheduleSave()
+end)
+
+Connect(ModeButton.Activated, function()
+    Dropdown.Visible = not Dropdown.Visible
+end)
+
+Connect(PhysicsOption.Activated, function()
+    SetMode("Physics")
+    Notify("Método selecionado: velocidade física.")
+end)
+
+Connect(WalkOption.Activated, function()
+    SetMode("WalkSpeed")
+    Notify("Método selecionado: WalkSpeed padrão.")
+end)
+
+Connect(SpeedInput.FocusLost, function()
+    SetSpeed(SpeedInput.Text)
+    SpeedInput.Text = tostring(Config.Speed)
+end)
+
+Connect(SliderHit.InputBegan, function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        Sliding = true
+        SliderInput = input
+
+        if SpeedInput:IsFocused() then
+            SpeedInput:ReleaseFocus()
+        end
+
+        SliderFromX(input.Position.X)
+    end
+end)
+
+Connect(UIS.InputChanged, function(input)
+    if not Sliding or not SliderInput then
+        return
+    end
+
+    if SliderInput.UserInputType == Enum.UserInputType.Touch then
+        if input == SliderInput then
+            SliderFromX(input.Position.X)
+        end
+    elseif input.UserInputType == Enum.UserInputType.MouseMovement then
+        SliderFromX(input.Position.X)
+    end
+end)
+
+Connect(UIS.InputEnded, function(input)
+    if input == SliderInput
+        or (
+            SliderInput
+            and SliderInput.UserInputType == Enum.UserInputType.MouseButton1
+            and input.UserInputType == Enum.UserInputType.MouseButton1
+        ) then
+        Sliding = false
+        SliderInput = nil
+    end
+end)
+
+Connect(UIS.WindowFocusReleased, CancelInputs)
+
+Connect(Minimize.Activated, function()
+    SetVisible(false)
+end)
+
+Connect(Floating.Activated, function()
+    if not FloatingDrag.Moved then
+        SetVisible(not Window.Visible)
+    end
+end)
+
+Connect(UIS.InputBegan, function(input, processed)
+    if processed or UIS:GetFocusedTextBox() then
+        return
+    end
+
+    if input.KeyCode == Enum.KeyCode.RightControl then
+        SetVisible(not Window.Visible)
+    end
+
+    if input.KeyCode == Enum.KeyCode.Escape then
+        Dropdown.Visible = false
+    end
+end)
+
+Connect(Player.CharacterAdded, BindCharacter)
+
+Connect(Player.CharacterRemoving, function(character)
+    if Character == character then
+        BindingVersion += 1
+        RestoreMovement()
+
+        Character = nil
+        Humanoid = nil
+        Root = nil
+        RefreshStatus()
+    end
+end)
+
+-- Aplica a velocidade antes da simulação física.
+-- Não usa teleporte por CFrame e não altera a velocidade vertical.
+Connect(RunService.PreSimulation, function()
+    if Alive and Config.Enabled then
+        ApplyMovement()
+    end
+end)
+
+local Elapsed = 0
+local ParticleTimer = 0
+local StatusTimer = 0
+local LayoutTimer = 0
+local LastViewport = Viewport()
+
+Connect(RunService.Heartbeat, function(deltaTime)
+    if not Alive then
+        return
+    end
+
+    Elapsed += deltaTime
+    ParticleTimer += deltaTime
+    StatusTimer += deltaTime
+    LayoutTimer += deltaTime
+
+    if StatusTimer >= 0.2 then
+        StatusTimer = 0
+        RefreshStatus()
+    end
+
+    if LayoutTimer >= 0.4 then
+        LayoutTimer = 0
+
+        local viewport = Viewport()
+
+        if viewport ~= LastViewport then
+            LastViewport = viewport
+            Layout()
+        end
+    end
+
+    if ParticleTimer >= 1 / 30 then
+        local step = math.min(ParticleTimer, 0.1)
+        ParticleTimer = 0
+
+        if Window.Visible and Config.Particles then
+            for _, data in ipairs(Particles) do
+                data.Y -= data.Speed * step
+
+                if data.Y < -0.02 then
+                    data.Y = 1.02
+                    data.X = Randomizer:NextNumber(0.03, 0.97)
+                end
+
+                data.Object.Position = UDim2.fromScale(
+                    data.X + math.sin(Elapsed * 0.6 + data.Phase) * 0.012,
+                    data.Y
+                )
+
+                data.Object.BackgroundTransparency = math.clamp(
+                    data.Transparency + math.sin(Elapsed + data.Phase) * 0.08,
+                    0.35,
+                    0.9
+                )
+            end
+        end
+    end
+end)
+
+--==============================================================
+-- CLEANUP
+--==============================================================
+Destroy = function()
+    if not Alive then
+        return
+    end
+
+    Alive = false
+    BindingVersion += 1
+    SaveVersion += 1
+    ToastVersion += 1
+
+    SaveNow()
+    Config.Enabled = false
+    RestoreMovement()
+
+    for _, connection in ipairs(Connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+    table.clear(Connections)
+
+    for _, tween in pairs(Tweens) do
+        pcall(function()
+            tween:Cancel()
+        end)
+    end
+    table.clear(Tweens)
+    table.clear(Particles)
+    table.clear(DragStates)
+
+    pcall(function()
+        Gui:Destroy()
+    end)
+
+    if Env[KEY] == App then
+        Env[KEY] = nil
+    end
+end
+
+App.Destroy = Destroy
+
+Connect(Close.Activated, Destroy)
+
+Connect(Gui.AncestryChanged, function()
+    if Alive and Gui.Parent == nil then
+        Destroy()
+    end
+end)
+
+--==============================================================
+-- INICIALIZAÇÃO
+--==============================================================
+SelectTab(false)
+RefreshSlider()
+PaintSpeed(false)
+PaintParticles(Config.Particles)
+
+ModeButton.Text = Config.Mode == "Physics"
+    and "Velocidade física    ▾"
+    or "WalkSpeed padrão    ▾"
+
+if Player.Character then
+    BindCharacter(Player.Character)
+end
+
+Notify("Selecione velocidade física e ative o toggle.")
